@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pomodoro</title>
+<style>
+  :root {
+    --bg: #0a0a0a; --soft: #141414; --hover: #1e1e1e; --line: #232323;
+    --fg: #f2f2f2; --mid: #9a9a9a; --dim: #6f6f6f;
+    --focus: #e5533d; --break: #3d9a76;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 24px; user-select: none;
+  }
+  .app { width: 100%; max-width: 460px; }
+  .row { display: flex; align-items: center; justify-content: space-between; }
+  .mode { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--focus); }
+  .mode.break { color: var(--break); }
+  .mode.done { color: var(--fg); }
+  #plan { font-size: 12px; color: var(--mid); background: none; border: 0;
+          cursor: pointer; font-family: inherit; }
+  #plan:hover { color: var(--fg); }
+  .time {
+    font: 400 clamp(56px, 17vw, 104px)/1.1 "Cascadia Mono", Consolas, monospace;
+    text-align: center; margin: 18px 0 10px; letter-spacing: -.02em; color: var(--mid);
+  }
+  .time.on { color: var(--fg); }
+  .bar { height: 3px; background: var(--line); }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--focus);
+             transition: width .2s linear; }
+  .bar > i.break { background: var(--break); }
+  .hint { text-align: center; color: var(--dim); font-size: 12px; margin: 12px 0 0; min-height: 18px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-top: 14px; }
+  button {
+    font: inherit; font-size: 13px; color: var(--mid); background: none; border: 0;
+    padding: 9px 18px; cursor: pointer; border-radius: 2px;
+  }
+  button:hover { background: var(--hover); color: var(--fg); }
+  button.primary { background: var(--soft); color: var(--focus); }
+  button.primary.break { color: var(--break); }
+  button.small { font-size: 12px; padding: 7px 14px; }
+  .foot { display: flex; justify-content: space-between; align-items: center;
+          margin-top: 26px; font-size: 11px; color: var(--dim); }
+  dialog {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 22px; width: min(440px, 92vw); font: inherit;
+    max-height: 88vh; overflow: auto;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  h2 { font-size: 11px; letter-spacing: .12em; color: var(--dim);
+       margin: 18px 0 8px; font-weight: 700; }
+  h2:first-child { margin-top: 0; }
+  label { display: block; font-size: 12px; color: var(--mid); margin-bottom: 4px; }
+  input[type=text], input[type=number] {
+    background: var(--soft); border: 1px solid var(--line); color: var(--fg);
+    padding: 8px 10px; font: inherit; font-size: 13px; border-radius: 2px; width: 100%;
+  }
+  input:focus { outline: none; border-color: var(--dim); }
+  .fields { display: flex; gap: 12px; }
+  .fields > div { flex: 1; }
+  .check { display: flex; align-items: center; gap: 8px; color: var(--mid);
+           font-size: 13px; margin: 6px 0; cursor: pointer; }
+  .check input { accent-color: var(--focus); }
+  ul { list-style: none; margin: 8px 0; padding: 0; background: var(--soft);
+       border-radius: 2px; max-height: 132px; overflow: auto; }
+  li { padding: 7px 10px; font-size: 13px; display: flex; justify-content: space-between;
+       cursor: pointer; }
+  li:hover { background: var(--hover); }
+  li span { color: var(--dim); }
+  .note { font-size: 11px; color: var(--dim); margin: 4px 0 0; }
+  .note.err { color: var(--focus); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="row">
+    <div class="mode" id="mode">FOKUS</div>
+    <button id="plan">Kein Plan ▾</button>
+  </div>
+  <div class="time" id="time">25:00</div>
+  <div class="bar"><i id="fill"></i></div>
+  <p class="hint" id="hint"></p>
+  <div class="actions" id="actions"></div>
+  <div class="foot">
+    <span id="stats"></span>
+    <button class="small" id="openSettings">Einstellungen</button>
+  </div>
+</div>
+
+<dialog id="settings">
+  <h2>ZEITEN (MINUTEN)</h2>
+  <div class="fields">
+    <div><label>Fokus</label><input type="text" id="sFocus"></div>
+    <div><label>Kurze Pause</label><input type="text" id="sShort"></div>
+    <div><label>Lange Pause</label><input type="text" id="sLong"></div>
+  </div>
+  <h2>ABLAUF</h2>
+  <div class="fields">
+    <div><label>Lange Pause nach x Runden</label><input type="number" id="sEvery" min="0"></div>
+    <div></div>
+  </div>
+  <label class="check"><input type="checkbox" id="sAuto"> Nach der Pause automatisch weiterlaufen</label>
+  <label class="check"><input type="checkbox" id="sSound"> Signalton am Ende</label>
+  <button class="small" id="testSound">Ton testen</button>
+  <h2>PLÄNE</h2>
+  <p class="note">Format: 4x90/20 · mehrere Blöcke mit + · 4x50/10 + 1x50/30</p>
+  <ul id="planList"></ul>
+  <div class="fields">
+    <div><label>Name</label><input type="text" id="pName" placeholder="Deep Work"></div>
+    <div><label>Ablauf</label><input type="text" id="pSpec" placeholder="4x90/20"></div>
+  </div>
+  <p class="note" id="preview"></p>
+  <div class="actions" style="justify-content:flex-start">
+    <button class="small" id="savePlan">Plan speichern</button>
+    <button class="small" id="delPlan">Löschen</button>
+  </div>
+  <p class="note err" id="sErr"></p>
+  <div class="actions" style="justify-content:flex-end;margin-top:16px">
+    <button class="small" id="cancel">Abbrechen</button>
+    <button class="primary" id="apply">Übernehmen</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+
+const DEFAULTS = {
+  focus: 25, short: 5, long: 15, longEvery: 4,
+  autoStart: true, sound: true,
+  plans: [
+    { name: "Klassisch", spec: "4x25/5" },
+    { name: "Deep Work", spec: "4x90/20" },
+    { name: "Sprint", spec: "6x45/10" },
+  ],
+  activePlan: null,
+  stats: { date: "", sessions: 0, minutes: 0 },
+};
+
+const cfg = Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem("pomodoro") || "{}"));
+const save = () => localStorage.setItem("pomodoro", JSON.stringify(cfg));
+
+// ---------------------------------------------------------------- Helfer --
+
+function parseMinutes(text) {
+  const t = String(text).trim().replace(",", ".");
+  if (!t) throw new Error("leer");
+  let m;
+  if (t.includes(":")) {
+    const [a, b] = t.split(":");
+    m = (parseFloat(a) || 0) + (parseFloat(b) || 0) / 60;
+  } else {
+    m = parseFloat(t);
+  }
+  if (!isFinite(m) || m <= 0 || m > 1440) throw new Error("ungültige Zeit");
+  return Math.round(m * 1e4) / 1e4;
+}
+
+function parsePlan(spec) {
+  const parts = String(spec || "").split(/[,+;]/).filter(p => p.trim());
+  if (!parts.length) throw new Error("Plan ist leer");
+  const blocks = parts.map(part => {
+    const m = part.trim().match(/^(?:(\d+)\s*[x*]\s*)?([\d.,:]+)\s*\/\s*([\d.,:]+)$/i);
+    if (!m) throw new Error(`'${part.trim()}' verstehe ich nicht (Format: 4x90/20)`);
+    const count = parseInt(m[1] || "1", 10);
+    if (count < 1 || count > 50) throw new Error("Runden: 1 bis 50");
+    return [count, parseMinutes(m[2]), parseMinutes(m[3])];
+  });
+  const rounds = blocks.reduce((a, b) => a + b[0], 0);
+  const steps = [];
+  let i = 0;
+  for (const [count, focus, brk] of blocks) {
+    for (let n = 0; n < count; n++) {
+      i++;
+      steps.push({ kind: "focus", minutes: focus, round: i, rounds });
+      steps.push({ kind: "break", minutes: brk, round: i, rounds });
+    }
+  }
+  return steps;
+}
+
+const fmtMin = m => Math.abs(m - Math.round(m)) < 1e-6
+  ? String(Math.round(m))
+  : `${Math.floor(m)}:${String(Math.round((m % 1) * 60)).padStart(2, "0")}`;
+
+function fmtDur(min) {
+  const t = Math.round(min);
+  if (t < 60) return `${t} min`;
+  const h = Math.floor(t / 60), m = t % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+function fmtClock(sec) {
+  sec = Math.max(0, Math.ceil(sec - 1e-6));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const pad = n => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
+function describePlan(steps) {
+  const f = steps.filter(s => s.kind === "focus").reduce((a, s) => a + s.minutes, 0);
+  const b = steps.filter(s => s.kind === "break").reduce((a, s) => a + s.minutes, 0);
+  return `${steps[0].rounds} Runden · ${fmtDur(f)} Fokus + ${fmtDur(b)} Pause · gesamt ${fmtDur(f + b)}`;
+}
+
+// ----------------------------------------------------------------- Sound --
+
+let audio = null;
+function chime(kind) {
+  if (!cfg.sound) return;
+  audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+  if (audio.state === "suspended") audio.resume();
+  const base = kind === "focus" ? [880, 1174.7, 1568] : [523.25, 659.25, 784];
+  base.forEach((f, i) => {
+    const t0 = audio.currentTime + i * 0.12;
+    const osc = audio.createOscillator(), gain = audio.createGain();
+    osc.type = "sine";
+    osc.frequency.value = f;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.22, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.4);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t0);
+    osc.stop(t0 + 1.5);
+  });
+}
+
+// ----------------------------------------------------------------- State --
+
+const el = id => document.getElementById(id);
+const S = { state: "idle", mode: "focus", duration: 0, remaining: 0, deadline: 0,
+            focusDone: 0, steps: [], index: 0, planName: null };
+
+function loadPlan(name) {
+  S.steps = []; S.index = 0; S.planName = null; cfg.activePlan = null;
+  const plan = cfg.plans.find(p => p.name === name);
+  if (plan) {
+    try {
+      S.steps = parsePlan(plan.spec);
+      S.planName = plan.name;
+      cfg.activePlan = plan.name;
+    } catch { /* kaputter Plan wird ignoriert */ }
+  }
+  save();
+  const step = current();
+  setMode("focus", step ? step.minutes : cfg.focus);
+  render();
+}
+
+const current = () => (S.steps.length && S.index < S.steps.length) ? S.steps[S.index] : null;
+
+function setMode(mode, minutes) {
+  S.mode = mode;
+  S.duration = Math.max(1, minutes * 60);
+  S.remaining = S.duration;
+  S.state = "idle";
+}
+
+function start() {
+  if (S.state === "running") return;
+  if (S.remaining <= 0) S.remaining = S.duration;
+  S.deadline = performance.now() / 1000 + S.remaining;
+  S.state = "running";
+  if (cfg.sound) { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); }
+  render();
+}
+
+function pause() {
+  if (S.state !== "running") return;
+  S.remaining = Math.max(0, S.deadline - performance.now() / 1000);
+  S.state = "paused";
+  render();
+}
+
+const toggle = () => (S.state === "running" ? pause() : (S.state === "choice" || start()));
+const reset = () => { S.state = "idle"; S.remaining = S.duration; render(); };
+
+function skip() {
+  if (S.state === "choice") return;
+  S.state = "idle"; S.remaining = 0;
+  finish(false);
+}
+
+function rollStats() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (cfg.stats.date !== today) cfg.stats = { date: today, sessions: 0, minutes: 0 };
+}
+
+function finish(counted = true) {
+  const wasFocus = S.mode === "focus";
+  if (counted) {
+    chime(wasFocus ? "focus" : "break");
+    if (wasFocus) {
+      rollStats();
+      cfg.stats.sessions++;
+      cfg.stats.minutes = Math.round((cfg.stats.minutes + S.duration / 60) * 10) / 10;
+      save();
+    }
+    document.title = wasFocus ? "Session fertig · Pomodoro" : "Pause vorbei · Pomodoro";
+  }
+
+  if (wasFocus) {
+    S.focusDone++;
+    if (S.steps.length && S.index < S.steps.length) S.index++;
+    S.state = "choice";
+    render();
+    return;
+  }
+
+  if (S.steps.length && S.index < S.steps.length) S.index++;
+  const step = current();
+  if (S.steps.length && !step) return planDone();
+  setMode("focus", step ? step.minutes : cfg.focus);
+  if (cfg.autoStart) start(); else render();
+}
+
+function planDone() {
+  S.index = 0; S.focusDone = 0;
+  const step = current();
+  setMode("focus", step ? step.minutes : cfg.focus);
+  render();
+  el("hint").textContent = "Plan abgeschlossen · gut gemacht";
+}
+
+function chooseBreak(kind) {
+  setMode(kind, kind === "short" ? cfg.short : cfg.long);
+  start();
+}
+
+function choosePlanBreak() {
+  const step = current();
+  if (!step || step.kind !== "break") return chooseBreak("short");
+  setMode(step.minutes >= cfg.long ? "long" : "short", step.minutes);
+  start();
+}
+
+function chooseFocus() {
+  if (S.steps.length) {
+    if (S.index < S.steps.length && S.steps[S.index].kind === "break") S.index++;
+    const step = current();
+    if (!step) return planDone();
+    setMode("focus", step.minutes);
+  } else {
+    setMode("focus", cfg.focus);
+  }
+  start();
+}
+
+function chooseStop() {
+  if (S.steps.length && S.index < S.steps.length && S.steps[S.index].kind === "break") S.index++;
+  const step = current();
+  setMode("focus", step ? step.minutes : cfg.focus);
+  render();
+}
+
+// ---------------------------------------------------------------- Render --
+
+function button(parent, text, fn, cls = "") {
+  const b = document.createElement("button");
+  b.textContent = text;
+  b.className = cls;
+  b.onclick = fn;
+  parent.appendChild(b);
+  return b;
+}
+
+function render() {
+  const isBreak = S.mode !== "focus";
+  const modeEl = el("mode"), timeEl = el("time");
+
+  if (S.state === "choice") {
+    modeEl.textContent = "SESSION BEENDET";
+    modeEl.className = "mode done";
+    timeEl.textContent = "00:00";
+  } else {
+    modeEl.textContent = { focus: "FOKUS", short: "KURZE PAUSE", long: "LANGE PAUSE" }[S.mode];
+    modeEl.className = "mode" + (isBreak ? " break" : "");
+    timeEl.textContent = fmtClock(S.remaining);
+  }
+  timeEl.className = "time" + (S.state === "running" ? " on" : "");
+
+  const progress = S.state === "choice" ? 1 : 1 - Math.max(0, S.remaining) / S.duration;
+  const fill = el("fill");
+  fill.style.width = `${Math.min(100, progress * 100)}%`;
+  fill.className = isBreak ? "break" : "";
+
+  el("plan").textContent = S.steps.length
+    ? `${S.planName} · Runde ${(current() || S.steps[S.steps.length - 1]).round}/${S.steps[0].rounds} ▾`
+    : "Kein Plan ▾";
+
+  el("hint").textContent = {
+    choice: "Wie geht es weiter?",
+    running: "Leertaste: Pause · S: überspringen",
+    paused: "Pausiert · Leertaste: weiter",
+    idle: `${fmtMin(S.duration / 60)} min · Leertaste: Start`,
+  }[S.state];
+
+  rollStats();
+  el("stats").textContent = `Heute: ${cfg.stats.sessions} Sessions · ${fmtDur(cfg.stats.minutes)}`;
+  if (S.state !== "choice") document.title = `${fmtClock(S.remaining)} · Pomodoro`;
+
+  const box = el("actions");
+  box.innerHTML = "";
+  if (S.state === "choice") {
+    const step = current();
+    const shortTxt = `Kurz · ${fmtMin(cfg.short)}`, longTxt = `Lang · ${fmtMin(cfg.long)}`;
+    if (step && step.kind === "break") {
+      button(box, `Plan-Pause · ${fmtMin(step.minutes)} min`, choosePlanBreak, "primary break");
+      button(box, shortTxt, () => chooseBreak("short"), "small");
+      button(box, longTxt, () => chooseBreak("long"), "small");
+    } else if (cfg.longEvery > 0 && S.focusDone % cfg.longEvery === 0) {
+      button(box, `Lange Pause · ${fmtMin(cfg.long)} min`, () => chooseBreak("long"), "primary break");
+      button(box, shortTxt, () => chooseBreak("short"), "small");
+    } else {
+      button(box, `Kurze Pause · ${fmtMin(cfg.short)} min`, () => chooseBreak("short"), "primary break");
+      button(box, longTxt, () => chooseBreak("long"), "small");
+    }
+    const row = document.createElement("div");
+    row.className = "actions";
+    row.style.flexBasis = "100%";
+    box.appendChild(row);
+    button(row, "Weiter arbeiten", chooseFocus, "small");
+    button(row, "Stopp", chooseStop, "small");
+    return;
+  }
+  const label = S.state === "running" ? "Pause" : (S.state === "paused" ? "Weiter" : "Start");
+  button(box, label, toggle, "primary" + (isBreak ? " break" : ""));
+  button(box, "Reset", reset, "small");
+  button(box, "Skip", skip, "small");
+}
+
+function tick() {
+  if (S.state === "running") {
+    S.remaining = S.deadline - performance.now() / 1000;
+    if (S.remaining <= 0) { S.remaining = 0; finish(); }
+    render();
+  }
+  requestAnimationFrame(tick);
+}
+
+// -------------------------------------------------------------- Settings --
+
+const dlg = el("settings");
+
+function fillSettings() {
+  el("sFocus").value = fmtMin(cfg.focus);
+  el("sShort").value = fmtMin(cfg.short);
+  el("sLong").value = fmtMin(cfg.long);
+  el("sEvery").value = cfg.longEvery;
+  el("sAuto").checked = cfg.autoStart;
+  el("sSound").checked = cfg.sound;
+  el("sErr").textContent = "";
+  renderPlanList();
+}
+
+function renderPlanList() {
+  const list = el("planList");
+  list.innerHTML = "";
+  cfg.plans.forEach(p => {
+    const li = document.createElement("li");
+    li.innerHTML = `<b>${p.name}</b><span>${p.spec}</span>`;
+    li.onclick = () => { el("pName").value = p.name; el("pSpec").value = p.spec; preview(); };
+    list.appendChild(li);
+  });
+}
+
+function preview() {
+  const note = el("preview");
+  try {
+    note.textContent = describePlan(parsePlan(el("pSpec").value));
+    note.className = "note";
+  } catch (e) {
+    note.textContent = el("pSpec").value.trim() ? e.message : "";
+    note.className = "note err";
+  }
+}
+
+el("openSettings").onclick = () => { fillSettings(); dlg.showModal(); };
+el("cancel").onclick = () => dlg.close();
+el("testSound").onclick = () => { const s = cfg.sound; cfg.sound = true; chime("focus"); cfg.sound = s; };
+el("pSpec").oninput = preview;
+
+el("savePlan").onclick = () => {
+  const name = el("pName").value.trim(), spec = el("pSpec").value.trim();
+  if (!name) { el("sErr").textContent = "Bitte einen Namen für den Plan angeben."; return; }
+  try { parsePlan(spec); } catch (e) { el("sErr").textContent = `Plan: ${e.message}`; return; }
+  const existing = cfg.plans.find(p => p.name === name);
+  if (existing) existing.spec = spec; else cfg.plans.push({ name, spec });
+  el("sErr").textContent = "";
+  save();
+  renderPlanList();
+};
+
+el("delPlan").onclick = () => {
+  const name = el("pName").value.trim();
+  cfg.plans = cfg.plans.filter(p => p.name !== name);
+  if (cfg.activePlan === name) loadPlan(null);
+  save();
+  renderPlanList();
+};
+
+el("apply").onclick = () => {
+  let focus, short, long;
+  try {
+    focus = parseMinutes(el("sFocus").value);
+    short = parseMinutes(el("sShort").value);
+    long = parseMinutes(el("sLong").value);
+  } catch {
+    el("sErr").textContent = "Zeiten bitte als Minuten angeben (z. B. 90 oder 1:30).";
+    return;
+  }
+  Object.assign(cfg, {
+    focus, short, long,
+    longEvery: Math.max(0, parseInt(el("sEvery").value, 10) || 0),
+    autoStart: el("sAuto").checked,
+    sound: el("sSound").checked,
+  });
+  save();
+  if (S.state === "idle" && S.mode === "focus" && !S.steps.length) setMode("focus", focus);
+  render();
+  dlg.close();
+};
+
+el("plan").onclick = () => {
+  const names = ["Kein Plan", ...cfg.plans.map(p => `${p.name} (${p.spec})`)];
+  const answer = prompt("Plan wählen - Nummer eingeben:\n\n" +
+    names.map((n, i) => `${i}: ${n}`).join("\n"), "0");
+  if (answer === null) return;
+  const i = parseInt(answer, 10);
+  loadPlan(i > 0 && cfg.plans[i - 1] ? cfg.plans[i - 1].name : null);
+};
+
+document.addEventListener("keydown", e => {
+  if (dlg.open || ["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
+  if (e.code === "Space" || e.code === "Enter") { e.preventDefault(); toggle(); }
+  else if (e.key === "r") reset();
+  else if (e.key === "s") skip();
+  else if (S.state === "choice") {
+    if (e.key === "1") chooseBreak("short");
+    else if (e.key === "2") chooseBreak("long");
+    else if (e.key === "3") chooseFocus();
+  }
+});
+
+rollStats();
+loadPlan(cfg.activePlan);
+tick();
+</script>
+</body>
+</html>
