@@ -7,8 +7,16 @@ if not exist "pomodoro.py" (
     echo pomodoro.py liegt nicht in diesem Ordner:
     echo   %~dp0
     echo.
-    echo Diese Datei muss neben Pomodoro.bat liegen. Beim Entpacken eines ZIPs
-    echo bitte den kompletten Ordner entpacken, nicht nur die Batchdatei.
+    echo Diese Batchdatei startet nur - das Programm selbst steckt in
+    echo pomodoro.py. Beide Dateien muessen im selben Ordner liegen.
+    echo.
+    echo So holst du alles auf einmal:
+    echo   1. Auf GitHub oben rechts "Code" ^> "Download ZIP"
+    echo   2. Im Explorer Rechtsklick auf das ZIP ^> "Alle extrahieren"
+    echo      ^(nicht nur reinschauen und eine Datei herausziehen^)
+    echo   3. Im entpackten Ordner Pomodoro.bat starten
+    echo.
+    echo Ohne Python und ohne Entpacken: pomodoro.html doppelklicken.
     echo.
     pause
     exit /b 1
