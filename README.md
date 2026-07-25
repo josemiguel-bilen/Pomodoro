@@ -26,6 +26,24 @@ Datei, die sich frei verschieben lässt (z. B. auf den Desktop) und ohne Python 
 `pomodoro.html` doppelklicken. Läuft im Browser, gleiche Funktionen, Einstellungen
 werden im Browser gespeichert.
 
+## Das Fenster geht sofort wieder zu
+
+**`Diagnose.bat` doppelklicken.** Das Fenster bleibt offen und zeigt, woran es
+liegt – Python-Version, Tkinter, und die vollständige Fehlermeldung.
+
+Die drei häufigsten Ursachen:
+
+| Symptom | Ursache | Lösung |
+|---------|---------|--------|
+| Nichts passiert, kurzes schwarzes Fenster | Python ohne Tkinter installiert | Einstellungen → Apps → Python → Ändern → **Modify** → **"tcl/tk and IDLE"** anhaken |
+| „pomodoro.py liegt nicht in diesem Ordner" | ZIP nur teilweise entpackt | Kompletten Ordner entpacken, `Pomodoro.bat` und `pomodoro.py` müssen nebeneinander liegen |
+| „Python wurde nicht gefunden" | PATH-Eintrag fehlt | Python neu installieren und **"Add python.exe to PATH"** anhaken |
+
+Stürzt die App später ab, erscheint ein Fenster mit der Meldung; die Details
+stehen in `%APPDATA%\MinimalPomodoro\fehler.log`.
+
+Wenn es schnell gehen muss: `pomodoro.html` doppelklicken – braucht kein Python.
+
 ## Bedienung
 
 | Taste | Wirkung |
@@ -94,6 +112,6 @@ Alle Werte landen in `%APPDATA%\MinimalPomodoro\config.json`:
 python -m unittest discover -s tests
 ```
 
-23 Tests für Zeit- und Planparser, Formatierung, Tonerzeugung sowie den kompletten
-Ablauf (Plan durchlaufen, Pausenauswahl, Statistik, Einstellungsdialog).
+25 Tests für Zeit- und Planparser, Formatierung, Tonerzeugung sowie den kompletten
+Ablauf (Plan durchlaufen, Pausenauswahl, Statistik, Einstellungsdialog, Absturzmeldung).
 Die GUI-Tests werden übersprungen, wenn kein Bildschirm verfügbar ist.

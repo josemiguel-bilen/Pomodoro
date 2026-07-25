@@ -6,6 +6,8 @@ Die GUI-Tests brauchen ein Display (unter Linux z. B. via Xvfb) und werden
 sonst automatisch uebersprungen.
 """
 
+import contextlib
+import io
 import struct
 import sys
 import tempfile
@@ -98,6 +100,38 @@ class TestSound(unittest.TestCase):
         data_size = struct.unpack("<I", wav[40:44])[0]
         self.assertEqual(data_size, 8000 * 0.2 * 2)
         self.assertEqual(len(wav), 44 + data_size)
+
+
+class TestErrorReport(unittest.TestCase):
+    """Ohne Konsole (pythonw / .exe) muss ein Absturz trotzdem sichtbar werden."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._dir, self._log = p.CONFIG_DIR, p.LOG_PATH
+        p.CONFIG_DIR = Path(self.tmp.name) / "cfg"
+        p.LOG_PATH = p.CONFIG_DIR / "fehler.log"
+
+    def tearDown(self):
+        p.CONFIG_DIR, p.LOG_PATH = self._dir, self._log
+        self.tmp.cleanup()
+
+    def test_writes_log(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            p.report_error("Kaputt", "Traceback hier")
+        text = p.LOG_PATH.read_text(encoding="utf-8")
+        self.assertIn("Kaputt", text)
+        self.assertIn("Traceback hier", text)
+
+    def test_main_reports_crash(self):
+        broken = lambda: (_ for _ in ()).throw(RuntimeError("Boom beim Start"))
+        original, p.PomodoroApp = p.PomodoroApp, broken
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    p.main()
+        finally:
+            p.PomodoroApp = original
+        self.assertIn("Boom beim Start", p.LOG_PATH.read_text(encoding="utf-8"))
 
 
 def _tk_available():

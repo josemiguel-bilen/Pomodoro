@@ -13,13 +13,62 @@ import re
 import struct
 import sys
 import time
-import tkinter as tk
-import tkinter.font as tkfont
+import traceback
 from datetime import date
 from pathlib import Path
 
 APP_NAME = "Pomodoro"
 IS_WINDOWS = sys.platform.startswith("win")
+
+# ------------------------------------------------------------- Config ------
+
+if IS_WINDOWS:
+    CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MinimalPomodoro"
+else:
+    CONFIG_DIR = Path.home() / ".config" / "minimal-pomodoro"
+CONFIG_PATH = CONFIG_DIR / "config.json"
+LOG_PATH = CONFIG_DIR / "fehler.log"
+
+
+# ------------------------------------------------------- Fehlermeldungen ----
+
+
+def report_error(message: str, detail: str = "") -> None:
+    """Fehler sichtbar machen - auch wenn ohne Konsole gestartet wurde.
+
+    pythonw.exe und die .exe haben kein Konsolenfenster; ein Traceback waere
+    sonst unsichtbar und das Programm wuerde einfach kommentarlos verschwinden.
+    """
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        LOG_PATH.write_text(f"{message}\n\n{detail}\n", encoding="utf-8")
+        message += f"\n\nDetails stehen in:\n{LOG_PATH}"
+    except OSError:
+        message += f"\n\n{detail}"
+
+    if IS_WINDOWS:
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(None, message, APP_NAME, 0x10)
+            return
+        except Exception:
+            pass
+    print(f"{message}\n{detail}", file=sys.stderr)
+
+
+try:
+    import tkinter as tk
+    import tkinter.font as tkfont
+except ImportError as exc:  # Python ohne tcl/tk installiert
+    report_error(
+        "Zu dieser Python-Installation fehlt Tkinter.\n\n"
+        "So geht es weiter: Systemsteuerung → Programme → Python → Ändern → "
+        "Modify und dabei \"tcl/tk and IDLE\" anhaken.\n\n"
+        "Alternativ läuft pomodoro.html ohne Installation im Browser.",
+        f"{exc}\n\nPython: {sys.executable}\nVersion: {sys.version}",
+    )
+    raise SystemExit(1)
 
 # ---------------------------------------------------------------- Farben ----
 
@@ -38,13 +87,7 @@ MODE_LABELS = {"focus": "FOKUS", "short": "KURZE PAUSE", "long": "LANGE PAUSE"}
 
 UI_FONT = "TkDefaultFont"  # wird beim Start auf die beste vorhandene Familie gesetzt
 
-# ------------------------------------------------------------- Config ------
-
-if IS_WINDOWS:
-    CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MinimalPomodoro"
-else:
-    CONFIG_DIR = Path.home() / ".config" / "minimal-pomodoro"
-CONFIG_PATH = CONFIG_DIR / "config.json"
+# ------------------------------------------------------------ Vorgaben -----
 
 DEFAULT_CONFIG = {
     "focus": 25.0,
@@ -276,6 +319,17 @@ class FlatButton(tk.Label):
                        cursor="hand2" if enabled else "arrow")
 
 
+def _hwnd(window: tk.Misc):
+    """Fenster-Handle des echten Rahmenfensters (nicht des Tk-Kindfensters)."""
+    import ctypes
+    from ctypes import wintypes
+
+    get_parent = ctypes.windll.user32.GetParent
+    get_parent.argtypes = [wintypes.HWND]      # ohne argtypes wird das Handle
+    get_parent.restype = wintypes.HWND         # auf 64 Bit abgeschnitten
+    return get_parent(wintypes.HWND(window.winfo_id()))
+
+
 def dark_titlebar(window: tk.Misc) -> None:
     """Dunkle Titelleiste unter Windows 10/11."""
     if not IS_WINDOWS:
@@ -284,11 +338,12 @@ def dark_titlebar(window: tk.Misc) -> None:
         import ctypes
 
         window.update_idletasks()
-        hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+        hwnd = _hwnd(window)
         value = ctypes.c_int(1)
         for attribute in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (neu/alt)
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)
+                hwnd, ctypes.c_int(attribute), ctypes.byref(value),
+                ctypes.sizeof(value)
             )
     except Exception:
         pass
@@ -300,8 +355,7 @@ def flash_taskbar(window: tk.Misc) -> None:
     try:
         import ctypes
 
-        hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
-        ctypes.windll.user32.FlashWindow(hwnd, True)
+        ctypes.windll.user32.FlashWindow(_hwnd(window), True)
     except Exception:
         pass
 
@@ -761,7 +815,8 @@ class PomodoroApp(tk.Tk):
             self.time_label.configure(font=(self.font_digits, size))
 
     def _on_resize(self, event) -> None:
-        if event.widget is not self:
+        # kann feuern, bevor der Aufbau fertig ist
+        if event.widget is not self or not hasattr(self, "time_label"):
             return
         self.render()
 
@@ -1000,8 +1055,21 @@ class SettingsWindow(tk.Toplevel):
 
 
 def main() -> None:
-    app = PomodoroApp()
-    app.mainloop()
+    try:
+        app = PomodoroApp()
+        app.mainloop()
+    except SystemExit:
+        raise
+    except BaseException:
+        report_error(
+            "Der Timer konnte nicht gestartet werden.\n\n"
+            "Bitte schick mir den Text aus der Logdatei, dann finde ich die "
+            "Ursache.",
+            traceback.format_exc() + f"\nPython: {sys.executable}\n"
+                                     f"Version: {sys.version}\n"
+                                     f"Plattform: {sys.platform}",
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

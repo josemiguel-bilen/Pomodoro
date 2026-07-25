@@ -1,0 +1,7 @@
+# Batchdateien brauchen Windows-Zeilenenden, sonst verschluckt sich cmd.exe
+*.bat text eol=crlf
+
+*.py text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.png binary
