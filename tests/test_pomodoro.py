@@ -1,305 +1,250 @@
-"""Tests fuer den Pomodoro-Timer.
+"""Tests für den Pomodoro-Timer.
 
-    python3 -m unittest discover -s tests
+    python -m unittest discover -s tests
 
-Die GUI-Tests brauchen ein Display (unter Linux z. B. via Xvfb) und werden
-sonst automatisch uebersprungen.
+Die GUI-Tests brauchen ein Display und werden sonst übersprungen.
 """
 
-import contextlib
-import io
-import struct
+import json
+import os
 import sys
 import tempfile
+import time
 import unittest
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+os.environ.setdefault("POMODORO_DATA", tempfile.mkdtemp())
 
 import pomodoro as p  # noqa: E402
+
+
+class TempData(unittest.TestCase):
+    """Jeder Test bekommt einen leeren Datenordner."""
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        d = Path(self._dir.name)
+        self._old = {k: getattr(p, k) for k in
+                     ("DATA_DIR", "CONFIG_PATH", "SESSIONS_PATH", "CURRENT_PATH", "EVENT_LOG",
+                      "ICON_PATH", "LOG_PATH")}
+        p.DATA_DIR = d
+        p.CONFIG_PATH = d / "config.json"
+        p.SESSIONS_PATH = d / "sessions.jsonl"
+        p.CURRENT_PATH = d / "current.json"
+        p.EVENT_LOG = d / "ereignisse.log"
+        p.ICON_PATH = d / "pomodoro.ico"
+        p.LOG_PATH = d / "fehler.log"
+
+    def tearDown(self):
+        for k, v in self._old.items():
+            setattr(p, k, v)
+        self._dir.cleanup()
 
 
 class TestParsing(unittest.TestCase):
     def test_minutes(self):
         self.assertEqual(p.parse_minutes("90"), 90)
-        self.assertEqual(p.parse_minutes(" 25 "), 25)
         self.assertEqual(p.parse_minutes("1,5"), 1.5)
         self.assertEqual(p.parse_minutes("1:30"), 1.5)
-        self.assertAlmostEqual(p.parse_minutes("0:30"), 0.5)
-
-    def test_minutes_invalid(self):
         for bad in ["", "abc", "0", "-5", "2000"]:
             with self.assertRaises(ValueError, msg=bad):
                 p.parse_minutes(bad)
 
-    def test_plan_simple(self):
-        steps = p.parse_plan("4x90/20")
-        self.assertEqual(len(steps), 8)
-        self.assertEqual([s["kind"] for s in steps[:4]],
-                         ["focus", "break", "focus", "break"])
-        self.assertEqual(steps[0]["minutes"], 90)
-        self.assertEqual(steps[1]["minutes"], 20)
-        self.assertEqual(steps[0]["rounds"], 4)
-        self.assertEqual([s["round"] for s in steps], [1, 1, 2, 2, 3, 3, 4, 4])
-
-    def test_plan_variants(self):
-        self.assertEqual(len(p.parse_plan("4 X 90 / 20")), 8)
-        self.assertEqual(len(p.parse_plan("4*25/5")), 8)
-        self.assertEqual(len(p.parse_plan("25/5")), 2)  # ohne Anzahl = 1 Runde
-
-    def test_plan_multiblock(self):
-        steps = p.parse_plan("4x50/10 + 1x50/30")
-        self.assertEqual(len(steps), 10)
-        self.assertEqual(steps[0]["rounds"], 5)
-        self.assertEqual(steps[-1]["minutes"], 30)
-        self.assertEqual(steps[-1]["round"], 5)
-        # Komma und Semikolon trennen genauso
-        self.assertEqual(len(p.parse_plan("4x50/10, 1x50/30")), 10)
-        self.assertEqual(len(p.parse_plan("4x50/10; 1x50/30")), 10)
-
-    def test_plan_decimal_and_clock(self):
-        steps = p.parse_plan("2x1:30/0:30")
-        self.assertEqual(steps[0]["minutes"], 1.5)
-        self.assertEqual(steps[1]["minutes"], 0.5)
-
-    def test_plan_invalid(self):
-        for bad in ["", "   ", "abc", "4x90", "90/", "/20", "0x90/20", "99x1/1"]:
+    def test_signed_duration(self):
+        self.assertEqual(p.parse_signed_duration("90"), 90)
+        self.assertEqual(p.parse_signed_duration("1:30"), 1.5)
+        self.assertEqual(p.parse_signed_duration("1,5h"), 90)
+        self.assertEqual(p.parse_signed_duration("2h"), 120)
+        self.assertEqual(p.parse_signed_duration("-30"), -30)
+        self.assertEqual(p.parse_signed_duration("45 min"), 45)
+        for bad in ["", "-", "0", "abc", "30h"]:
             with self.assertRaises(ValueError, msg=bad):
-                p.parse_plan(bad)
+                p.parse_signed_duration(bad)
 
-    def test_describe_plan(self):
-        text = p.describe_plan(p.parse_plan("4x90/20"))
-        self.assertIn("4 Runden", text)
-        self.assertIn("6 h", text)          # 4 * 90 min Fokus
-        self.assertIn("1 h 20 min", text)   # 4 * 20 min Pause
+    def test_day(self):
+        today = date(2026, 11, 24)
+        self.assertEqual(p.parse_day("heute", today), today)
+        self.assertEqual(p.parse_day("", today), today)
+        self.assertEqual(p.parse_day("gestern", today), date(2026, 11, 23))
+        self.assertEqual(p.parse_day("20.11.", today), date(2026, 11, 20))
+        self.assertEqual(p.parse_day("20.11.26", today), date(2026, 11, 20))
+        self.assertEqual(p.parse_day("2026-11-01", today), date(2026, 11, 1))
+        self.assertEqual(p.parse_day("28.12.", date(2027, 1, 3)), date(2026, 12, 28))
+        for bad in ["25.11.2026", "morgen", "32.1.", "1.2.3.4"]:
+            with self.assertRaises(ValueError, msg=bad):
+                p.parse_day(bad, today)
 
+    def test_clock_time(self):
+        self.assertEqual(p.parse_clock_time(""), (12, 0))
+        self.assertEqual(p.parse_clock_time("9:05"), (9, 5))
+        self.assertEqual(p.parse_clock_time("14.30"), (14, 30))
+        self.assertEqual(p.parse_clock_time("7"), (7, 0))
+        with self.assertRaises(ValueError):
+            p.parse_clock_time("25:00")
 
-class TestFormatting(unittest.TestCase):
-    def test_clock(self):
-        self.assertEqual(p.fmt_clock(0), "00:00")
-        self.assertEqual(p.fmt_clock(59), "00:59")
-        self.assertEqual(p.fmt_clock(60), "01:00")
+    def test_formatting(self):
+        self.assertEqual(p.fmt_hm(45), "45m")
+        self.assertEqual(p.fmt_hm(125), "2h 05m")
         self.assertEqual(p.fmt_clock(1500), "25:00")
-        self.assertEqual(p.fmt_clock(5400), "1:30:00")
-        self.assertEqual(p.fmt_clock(-3), "00:00")
-        self.assertEqual(p.fmt_clock(24.2), "00:25")  # laufende Sekunde aufrunden
-
-    def test_minutes_and_duration(self):
-        self.assertEqual(p.fmt_minutes(90), "90")
-        self.assertEqual(p.fmt_minutes(5.5), "5:30")
-        self.assertEqual(p.fmt_duration(45), "45 min")
-        self.assertEqual(p.fmt_duration(60), "1 h")
-        self.assertEqual(p.fmt_duration(95), "1 h 35 min")
+        self.assertEqual(p.fmt_clock(3725), "1:02:05")
+        self.assertEqual(p.fmt_min(2.5), "2:30")
 
 
-class TestSound(unittest.TestCase):
-    def test_wav_header(self):
-        wav = p.build_chime(seconds=0.2, rate=8000)
-        self.assertEqual(wav[:4], b"RIFF")
-        self.assertEqual(wav[8:12], b"WAVE")
-        data_size = struct.unpack("<I", wav[40:44])[0]
-        self.assertEqual(data_size, 8000 * 0.2 * 2)
-        self.assertEqual(len(wav), 44 + data_size)
+def sess(start, minutes, task="study", **kw):
+    s = {"start": start.isoformat(), "min": minutes, "task": task, "_start": start}
+    s.update(kw)
+    return s
 
 
-class TestErrorReport(unittest.TestCase):
-    """Ohne Konsole (pythonw / .exe) muss ein Absturz trotzdem sichtbar werden."""
+class TestStats(unittest.TestCase):
+    def test_daily_totals_and_negative(self):
+        d = datetime(2026, 11, 20, 9)
+        ss = [sess(d, 25), sess(d, 25, "work"), sess(d, -10), sess(d + timedelta(days=1), 30),
+              sess(d + timedelta(days=1), -60)]
+        days = p.daily_totals(ss)
+        self.assertEqual(days[date(2026, 11, 20)], 40)
+        self.assertNotIn(date(2026, 11, 21), days)        # nie unter 0
+        self.assertEqual(p.daily_totals(ss, "work"), {date(2026, 11, 20): 25})
 
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self._dir, self._log = p.CONFIG_DIR, p.LOG_PATH
-        p.CONFIG_DIR = Path(self.tmp.name) / "cfg"
-        p.LOG_PATH = p.CONFIG_DIR / "fehler.log"
+    def test_streaks(self):
+        today = date(2026, 11, 24)
+        days = {today - timedelta(days=i): 30 for i in (0, 1, 2, 5, 6, 7, 8)}
+        self.assertEqual(p.streaks(days, today), (3, 4))
+        # heute noch nichts gemacht -> Streak bis gestern zählt
+        days.pop(today)
+        self.assertEqual(p.streaks(days, today)[0], 2)
 
-    def tearDown(self):
-        p.CONFIG_DIR, p.LOG_PATH = self._dir, self._log
-        self.tmp.cleanup()
+    def test_hour_histogram_splits_hours(self):
+        ss = [sess(datetime(2026, 11, 24, 9, 40), 50), sess(datetime(2026, 11, 24, 10, 0), -10)]
+        hist = p.hour_histogram(ss, None, datetime(2026, 11, 1))
+        self.assertAlmostEqual(hist[9], 20)
+        self.assertAlmostEqual(hist[10], 20)
 
-    def test_writes_log(self):
-        with contextlib.redirect_stderr(io.StringIO()):
-            p.report_error("Kaputt", "Traceback hier")
-        text = p.LOG_PATH.read_text(encoding="utf-8")
-        self.assertIn("Kaputt", text)
-        self.assertIn("Traceback hier", text)
-
-    def test_main_reports_crash(self):
-        broken = lambda: (_ for _ in ()).throw(RuntimeError("Boom beim Start"))
-        original, p.PomodoroApp = p.PomodoroApp, broken
-        try:
-            with contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit):
-                    p.main()
-        finally:
-            p.PomodoroApp = original
-        self.assertIn("Boom beim Start", p.LOG_PATH.read_text(encoding="utf-8"))
+    def test_window_sum_short_history(self):
+        today = date(2026, 11, 24)
+        days = {today: 60, today - timedelta(days=1): 30}
+        self.assertEqual(p.window_sum(days, today, 30), (90, 2))
 
 
-def _tk_available():
+class TestStorage(TempData):
+    def test_append_load_rewrite(self):
+        for m in (25, 50, 10):
+            self.assertTrue(p.append_session({"start": "2026-11-24T10:00:00", "min": m,
+                                              "task": "study"}))
+        ss = p.load_sessions()
+        self.assertEqual([s["min"] for s in ss], [25, 50, 10])
+        self.assertEqual([s["_line"] for s in ss], [0, 1, 2])
+        p.rewrite_sessions(lambda lines: lines[:1] + lines[2:])
+        self.assertEqual([s["min"] for s in p.load_sessions()], [25, 10])
+
+    def test_corrupt_lines_are_skipped(self):
+        p.SESSIONS_PATH.write_text('{"start": "2026-11-24T10:00:00", "min": 5}\nkaputt\n',
+                                   encoding="utf-8")
+        self.assertEqual(len(p.load_sessions()), 1)
+
+    def test_current_roundtrip(self):
+        p.write_current({"phase": "focus"})
+        self.assertEqual(p.read_current(), {"phase": "focus"})
+        p.write_current(None)
+        self.assertIsNone(p.read_current())
+
+    def test_icon(self):
+        path = p.ensure_icon()
+        data = path.read_bytes()
+        self.assertEqual(data[:4], b"\x00\x00\x01\x00")
+        self.assertIn(b"\x89PNG", data)
+
+
+def _display_available():
     try:
-        import tkinter
-
-        root = tkinter.Tk()
-        root.destroy()
+        r = p.tk.Tk()
+        r.destroy()
         return True
-    except Exception:
+    except p.tk.TclError:
         return False
 
 
-@unittest.skipUnless(_tk_available(), "kein Display / kein Tk verfuegbar")
-class TestApp(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        p.CONFIG_DIR = Path(self.tmp.name)
-        p.CONFIG_PATH = Path(self.tmp.name) / "config.json"
-        self.app = p.PomodoroApp()
-        self.app.cfg["sound"] = False
-        self.app.update()
+@unittest.skipUnless(_display_available(), "kein Display")
+class TestApp(TempData):
+    def make_app(self, **cfg):
+        cfg.setdefault("sound", False)
+        p.CONFIG_PATH.write_text(json.dumps(cfg), encoding="utf-8")
+        app = p.PomodoroApp()
+        app.start_watchdog = lambda: None
+        self.addCleanup(lambda: app.winfo_exists() and app.destroy())
+        app.update()
+        return app
 
-    def tearDown(self):
-        self.app.destroy()
-        self.tmp.cleanup()
+    def test_flow_focus_choice_break(self):
+        app = self.make_app(focus=25)
+        app.act("start")
+        self.assertEqual((app.phase, app.running), ("focus", True))
+        self.assertIsNotNone(p.read_current())
+        app.deadline = p.clock() - 1          # Zeit ist um
+        app._tick()
+        self.assertEqual(app.phase, "choice")
+        self.assertIsNone(p.read_current())
+        self.assertEqual(p.load_sessions()[0]["min"], 25)
+        app.act("break")
+        app.act("long")
+        self.assertEqual((app.phase, app.break_kind), ("break", "long"))
+        app.act("skip")
+        self.assertEqual(app.phase, "idle")
 
-    def test_start_pause_reset(self):
-        self.app.apply_mode("focus", 25)
-        self.app.start()
-        self.assertEqual(self.app.state_name, "running")
-        self.app.pause()
-        self.assertEqual(self.app.state_name, "paused")
-        self.assertGreater(self.app.remaining, 1400)
-        self.app.reset()
-        self.assertEqual(self.app.state_name, "idle")
-        self.assertEqual(self.app.remaining, 25 * 60)
+    def test_stop_counts_real_time(self):
+        app = self.make_app(focus=25)
+        app.act("start")
+        app.deadline -= 5 * 60                 # 5 Minuten gelernt
+        app.act("stop")
+        self.assertAlmostEqual(p.load_sessions()[0]["min"], 5, places=1)
+        self.assertGreater(app.today_minutes(), 4.9)
 
-    def test_focus_end_offers_choice(self):
-        self.app.set_plan(None)
-        self.app.apply_mode("focus", 25)
-        self.app.start()
-        self.app.finish()
-        self.assertEqual(self.app.state_name, "choice")
-        self.assertEqual(self.app.focus_done, 1)
-        self.assertEqual(self.app.cfg["stats"]["sessions"], 1)
+    def test_recover_running_focus(self):
+        p.write_current({"phase": "focus", "task": "study", "start": datetime.now().isoformat(),
+                         "duration": 1500, "running": True, "remaining": 1200,
+                         "clock": p.clock() - 60, "wall": time.time() - 60})
+        app = self.make_app()
+        self.assertEqual(app.phase, "focus")
+        self.assertAlmostEqual(app.remaining, 1140, delta=2)   # Ausfallzeit zählt mit
 
-    def test_custom_break_lengths(self):
-        self.app.cfg["short"] = 10
-        self.app.cfg["long"] = 25
-        self.app.set_plan(None)
-        self.app.apply_mode("focus", 25)
-        self.app.finish()
-        self.app.choose_break("short")
-        self.assertEqual(self.app.mode, "short")
-        self.assertEqual(self.app.duration, 10 * 60)
-        self.assertEqual(self.app.state_name, "running")
+    def test_recover_after_reboot_counts_until_checkpoint(self):
+        p.write_current({"phase": "focus", "task": "work",
+                         "start": (datetime.now() - timedelta(hours=1)).isoformat(),
+                         "duration": 1500, "running": True, "remaining": 900,
+                         "clock": p.clock() + 10_000, "wall": time.time() - 3600})
+        app = self.make_app()
+        self.assertEqual(app.phase, "idle")
+        s = p.load_sessions()[0]
+        self.assertEqual((s["min"], s["task"], s.get("recovered")), (10, "work", True))
 
-        self.app.finish()  # Pause vorbei -> zurueck in den Fokus
-        self.assertEqual(self.app.mode, "focus")
+    def test_recover_expired_focus_counts_fully(self):
+        p.write_current({"phase": "focus", "task": "study", "start": datetime.now().isoformat(),
+                         "duration": 1500, "running": True, "remaining": 30,
+                         "clock": p.clock() - 120, "wall": time.time() - 120})
+        app = self.make_app()
+        self.assertEqual(app.phase, "choice")
+        self.assertEqual(p.load_sessions()[0]["min"], 25)
 
-        self.app.finish()
-        self.app.choose_break("long")
-        self.assertEqual(self.app.duration, 25 * 60)
-
-    def test_auto_start_after_break_can_be_off(self):
-        self.app.cfg["auto_start_after_break"] = False
-        self.app.set_plan(None)
-        self.app.apply_mode("short", 5)
-        self.app.finish()
-        self.assertEqual(self.app.mode, "focus")
-        self.assertEqual(self.app.state_name, "idle")
-
-    def test_plan_runs_through(self):
-        self.app.cfg["plans"].append({"name": "Test", "spec": "2x25/5"})
-        self.app.set_plan("Test")
-        self.assertEqual(self.app.duration, 25 * 60)
-        self.assertEqual(len(self.app.plan_steps), 4)
-
-        self.app.start()
-        self.app.finish()                       # Fokus 1 vorbei
-        self.assertEqual(self.app.state_name, "choice")
-        step = self.app.current_step()
-        self.assertEqual((step["kind"], step["minutes"]), ("break", 5))
-
-        self.app.choose_plan_break()            # Plan-Pause uebernehmen
-        self.assertEqual(self.app.duration, 5 * 60)
-        self.app.finish()                       # Pause vorbei -> Fokus 2
-        self.assertEqual(self.app.mode, "focus")
-        self.assertEqual(self.app.duration, 25 * 60)
-        self.assertEqual(self.app.current_step()["round"], 2)
-
-        self.app.finish()                       # Fokus 2 vorbei
-        self.app.choose_focus()                 # Pause ueberspringen -> Plan zu Ende
-        self.assertEqual(self.app.plan_index, 0)
-        self.assertEqual(self.app.state_name, "idle")
-        self.assertEqual(self.app.cfg["stats"]["sessions"], 2)
-
-    def test_plan_90_20(self):
-        self.app.set_plan("Deep Work")          # 4x90/20 aus den Vorgaben
-        self.assertEqual(self.app.duration, 90 * 60)
-        for expected_round in (1, 2, 3, 4):
-            self.assertEqual(self.app.current_step()["round"], expected_round)
-            self.app.finish()                   # Fokus
-            self.assertEqual(self.app.state_name, "choice")
-            self.assertEqual(self.app.current_step()["minutes"], 20)
-            self.app.choose_plan_break()
-            self.app.finish()                   # Pause
-        self.assertEqual(self.app.plan_index, 0)  # Plan durch, zurueck auf Anfang
-        self.assertEqual(self.app.cfg["stats"]["sessions"], 4)
-
-    def test_long_break_suggested_every_n(self):
-        self.app.set_plan(None)
-        self.app.cfg["long_every"] = 4
-        for _ in range(3):
-            self.app.apply_mode("focus", 25)
-            self.app.finish()
-            self.app.choose_break("short")
-            self.app.finish()
-        self.assertEqual(self.app.focus_done, 3)
-        self.app.apply_mode("focus", 25)
-        self.app.finish()
-        self.assertEqual(self.app.focus_done % self.app.cfg["long_every"], 0)
-
-    def test_skip_does_not_count(self):
-        self.app.set_plan(None)
-        self.app.apply_mode("focus", 25)
-        self.app.start()
-        self.app.skip()
-        self.assertEqual(self.app.state_name, "choice")
-        self.assertEqual(self.app.cfg["stats"]["sessions"], 0)
-
-    def test_config_roundtrip(self):
-        self.app.cfg["focus"] = 42
-        p.save_config(self.app.cfg)
-        self.assertEqual(p.load_config()["focus"], 42)
-
-    def test_settings_window_applies(self):
-        win = p.SettingsWindow(self.app)
-        win.e_focus.delete(0, "end")
-        win.e_focus.insert(0, "1:30")
-        win.e_short.delete(0, "end")
-        win.e_short.insert(0, "10")
-        win._apply()
-        self.assertEqual(self.app.cfg["focus"], 1.5)
-        self.assertEqual(self.app.cfg["short"], 10)
-
-    def test_settings_window_rejects_bad_input(self):
-        win = p.SettingsWindow(self.app)
-        win.e_focus.delete(0, "end")
-        win.e_focus.insert(0, "kaese")
-        win._apply()
-        self.assertNotEqual(self.app.cfg["focus"], "kaese")
-        self.assertTrue(win.error.cget("text"))
-        win.destroy()
-
-    def test_settings_saves_plan(self):
-        win = p.SettingsWindow(self.app)
-        win.e_name.insert(0, "Mein Plan")
-        win.e_spec.insert(0, "3x45/15")
-        win._save_plan()
-        names = [pl["name"] for pl in self.app.cfg["plans"]]
-        self.assertIn("Mein Plan", names)
-        win._update_preview()
-        self.assertIn("3 Runden", win.preview.cget("text"))
-        win._delete_plan()
-        self.assertNotIn("Mein Plan", [pl["name"] for pl in self.app.cfg["plans"]])
-        win.destroy()
+    def test_manual_entry_tab(self):
+        app = self.make_app()
+        app.open_edit("history")
+        ew = app.edit_window
+        ew.update()
+        p.append_session({"start": datetime.now().replace(hour=8).isoformat(timespec="seconds"),
+                          "min": 45.0, "task": "study", "done": True, "manual": True})
+        app.refresh_today()
+        self.assertEqual(app.today_minutes(), 45)
+        entry = p.load_sessions()[0]
+        ew._delete_entry(entry)
+        self.assertEqual(p.load_sessions(), [])
+        self.assertEqual(app.today_minutes(), 0)
+        ew._undo_delete()
+        self.assertEqual(len(p.load_sessions()), 1)
+        for tab, _ in p.EditWindow.TABS:   # alle Tabs bauen sich fehlerfrei auf
+            ew.show_tab(tab)
+            ew.update()
 
 
 if __name__ == "__main__":

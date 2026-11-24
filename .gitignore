@@ -3,3 +3,8 @@ __pycache__/
 build/
 dist/
 *.spec
+
+# lokale Altbestände
+alt/
+Pomodoro-claude-pomodoro-timer-windows-ww2j8y/
+*.zip

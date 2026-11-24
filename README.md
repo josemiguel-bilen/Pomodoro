@@ -1,117 +1,78 @@
 # Pomodoro
 
-Minimalistischer, schwarzer Pomodoro-Timer für Windows. Freie Zeiten, Signalton am
-Ende jeder Einheit, nach jeder Session die Auswahl zwischen kurzer und langer Pause
-(beide selbst definiert) und vorab planbare Abläufe wie `4x90/20`.
+Minimaler Pomodoro-Timer für Windows: ein kleines schwarzes Widget ohne Rahmen, in der
+Mitte nur **Start**. Alles andere steckt im Bearbeitungsmodus (Rechtsklick).
+Reines Python (Standardbibliothek + Tkinter), nichts nachzuinstallieren.
 
-![Fokus läuft](docs/screenshot-timer.png)
+![Start](docs/widget-start.png) ![Läuft](docs/widget-running.png) ![Nach dem Pomodoro](docs/widget-choice.png)
 
-## Starten
+## Einrichten
 
-**Variante A – mit Python** (empfohlen, echtes Desktop-Fenster)
+1. Python von [python.org](https://www.python.org/downloads/) installieren
+   (beim Setup „Add python.exe to PATH“ und „tcl/tk and IDLE“ anhaken).
+2. Einmal ausführen:
 
-1. Python von [python.org](https://www.python.org/downloads/) installieren,
-   beim Setup **"Add python.exe to PATH"** anhaken.
-2. `Pomodoro.bat` doppelklicken.
+   ```
+   pythonw pomodoro.py --install
+   ```
 
-Es wird nichts nachinstalliert – die App nutzt nur die Python-Standardbibliothek.
-
-**Variante B – eigene .exe**
-
-`build_exe.bat` doppelklicken. Danach liegt unter `dist\Pomodoro.exe` eine einzelne
-Datei, die sich frei verschieben lässt (z. B. auf den Desktop) und ohne Python läuft.
-
-**Variante C – ohne Installation**
-
-`pomodoro.html` doppelklicken. Läuft im Browser, gleiche Funktionen, Einstellungen
-werden im Browser gespeichert.
-
-## Das Fenster geht sofort wieder zu
-
-**`Diagnose.bat` doppelklicken.** Das Fenster bleibt offen und zeigt, woran es
-liegt – Python-Version, Tkinter, und die vollständige Fehlermeldung.
-
-Die drei häufigsten Ursachen:
-
-| Symptom | Ursache | Lösung |
-|---------|---------|--------|
-| Nichts passiert, kurzes schwarzes Fenster | Python ohne Tkinter installiert | Einstellungen → Apps → Python → Ändern → **Modify** → **"tcl/tk and IDLE"** anhaken |
-| „pomodoro.py liegt nicht in diesem Ordner" | ZIP nur teilweise entpackt | Kompletten Ordner entpacken, `Pomodoro.bat` und `pomodoro.py` müssen nebeneinander liegen |
-| „Python wurde nicht gefunden" | PATH-Eintrag fehlt | Python neu installieren und **"Add python.exe to PATH"** anhaken |
-
-Stürzt die App später ab, erscheint ein Fenster mit der Meldung; die Details
-stehen in `%APPDATA%\MinimalPomodoro\fehler.log`.
-
-Wenn es schnell gehen muss: `pomodoro.html` doppelklicken – braucht kein Python.
+   Das legt eine Verknüpfung **Pomodoro** auf dem Desktop und im Startmenü an
+   (im Startmenü rechtsklicken → „An Taskleiste anheften“) und startet den Timer
+   automatisch bei der Windows-Anmeldung. Rückgängig: `pythonw pomodoro.py --uninstall`.
+   Autostart lässt sich auch unter *Bearbeiten → Timer* an- und ausschalten.
 
 ## Bedienung
 
-| Taste | Wirkung |
-|-------|---------|
-| `Leertaste` | Start / Pause |
-| `R` | Zurücksetzen |
-| `S` | Aktuelle Einheit überspringen |
-| `1` / `2` / `3` | Im Auswahlbildschirm: kurze Pause / lange Pause / weiterarbeiten |
-| `Esc` | Fenster minimieren |
+| Aktion | So geht's |
+|---|---|
+| Pomodoro starten | **Start** klicken oder Leertaste |
+| Pause / weiter | Klick auf die Zeit oder Leertaste |
+| Stoppen | Maus übers Widget → *stop* (zählt mit der echten Dauer, ab 1 min) |
+| Nach dem Pomodoro | **Start** (weiterlernen) oder **Break** → *Short* / *Long* |
+| Aufgabe wechseln | Klick oben links (z. B. `study ▾`) |
+| Verschieben | Widget ziehen |
+| Bearbeiten, Statistik, Zeit nachtragen | Rechtsklick |
 
-### Ablauf
+Unten rechts steht die heutige Lernzeit (nur Fokuszeit, keine Pausen).
 
-Läuft eine Fokus-Einheit ab, ertönt ein Signalton, das Fenster meldet sich in der
-Taskleiste und es erscheint die Auswahl:
+## Bearbeitungsmodus
 
-![Auswahl nach der Session](docs/screenshot-choice.png)
+- **Timer** – Länge von Pomodoro, kurzer und langer Pause; nach wie vielen Pomodoros
+  die lange Pause vorgeschlagen wird; Ton; immer im Vordergrund; Autostart.
+- **Aufgaben** – z. B. `study`, `work`, mit optionalem Tagesziel in Stunden.
+- **Look** – 8 Hintergründe mit jeweils passenden Button-Farben, Größe S/M/L.
+- **Statistik** – heute, Woche, Streak, Ø pro Tag/Woche, aktive Tage, Heatmap der
+  letzten 18 Wochen, Tageszeit-Verteilung, Tabelle pro Aufgabe mit Zielfortschritt;
+  filterbar nach Aufgabe.
+- **Einträge** – Zeit nachtragen (z. B. Lernen ohne Laptop; negative Dauer zieht Zeit
+  ab) und einzelne Einträge löschen, mit Rückgängig.
 
-- **Kurze Pause / Lange Pause** – die beiden Zeiten legst du vorher in den
-  Einstellungen fest. Steht dort 10 bei "Kurze Pause", startet ein Klick auf
-  "Kurz · 10" genau 10 Minuten.
-- **Plan-Pause** – ist ein Plan aktiv, wird dessen Pause als erste Option
-  vorgeschlagen; kurz/lang bleiben trotzdem wählbar.
-- **Weiter arbeiten** – Pause überspringen, direkt die nächste Fokus-Einheit.
-- **Stopp** – Timer anhalten, nichts läuft weiter.
+![Statistik](docs/statistik.png)
+![Einträge](docs/eintraege.png)
 
-Nach einer Pause geht es automatisch mit dem Fokus weiter (abschaltbar in den
-Einstellungen). Ohne aktiven Plan wird nach je 4 Einheiten (einstellbar) die lange
-Pause als Hauptoption vorgeschlagen.
+## Zuverlässigkeit
 
-### Pläne
+- Ein laufender Pomodoro wird alle 30 s gesichert. Nach Absturz oder Neustart läuft er
+  einfach weiter; nach einem Ausschalten zählt die Zeit bis zum letzten Stand.
+- Ein Wächter-Thread erkennt, wenn das Fenster hängt, und startet die App automatisch
+  neu – ohne Zeitverlust.
+- Standby (Laptop zugeklappt) zählt nicht als Lernzeit.
+- Energiesparend: Im Leerlauf läuft kein Takt; während eines Pomodoros wird genau
+  einmal pro Sekunde gezeichnet.
 
-Ein Plan ist eine Abfolge von Runden, geschrieben als `Anzahl x Fokus/Pause`:
+## Daten
 
-| Eingabe | Bedeutung |
-|---------|-----------|
-| `4x90/20` | 4 Runden mit 90 min Fokus und 20 min Pause |
-| `4x25/5` | klassischer Pomodoro |
-| `4x50/10 + 1x50/30` | 4 kurze Runden, dann eine mit langer Pause |
-| `2x1:30/0:30` | 1½ min Fokus, 30 s Pause (zum Ausprobieren) |
+Alles liegt in `%APPDATA%\MinimalPomodoro`:
 
-Mehrere Blöcke werden mit `+`, `,` oder `;` verkettet. Zeiten gehen als Minuten
-(`90`), Dezimalzahl (`1,5`) oder als `Minuten:Sekunden` (`1:30`).
-
-Pläne legst du unter **Einstellungen → Pläne** an; die Vorschau zeigt sofort, wie
-lange der Ablauf insgesamt dauert. Über die Anzeige oben rechts im Hauptfenster
-wählst du den aktiven Plan aus. Die Kopfzeile zeigt dann die aktuelle Runde
-(`Deep Work · Runde 2/4`). Ist der Plan durch, springt der Timer auf den Anfang
-zurück.
-
-![Einstellungen](docs/screenshot-settings.png)
-
-## Einstellungen
-
-Alle Werte landen in `%APPDATA%\MinimalPomodoro\config.json`:
-
-- **Fokus / Kurze Pause / Lange Pause** – frei einstellbar, von Sekunden bis Stunden
-- **Lange Pause nach x Runden** – 0 schaltet den Vorschlag ab
-- **Nach der Pause automatisch weiterlaufen**
-- **Signalton am Ende** – der Ton wird beim Start selbst erzeugt, es wird keine
-  Audiodatei gebraucht
-- **Fenster immer im Vordergrund**
+| Datei | Inhalt |
+|---|---|
+| `config.json` | Einstellungen |
+| `sessions.jsonl` | Statistik, ein Eintrag pro Pomodoro/Nachtrag |
+| `current.json` | laufender Pomodoro (nur während er läuft) |
+| `ereignisse.log` | Fehler, Hänger, Wiederherstellungen |
 
 ## Tests
 
 ```
 python -m unittest discover -s tests
 ```
-
-25 Tests für Zeit- und Planparser, Formatierung, Tonerzeugung sowie den kompletten
-Ablauf (Plan durchlaufen, Pausenauswahl, Statistik, Einstellungsdialog, Absturzmeldung).
-Die GUI-Tests werden übersprungen, wenn kein Bildschirm verfügbar ist.
