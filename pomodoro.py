@@ -1372,6 +1372,7 @@ class PomodoroApp(tk.Tk):
             pass
         save_config(self.cfg)
         self._cancel_tick()
+        log_event("Beendet (Schließen)")
         self.destroy()
 
 
@@ -2088,6 +2089,15 @@ def main() -> None:
     lock = single_instance()
     if lock is None:
         return
+    # Protokoll: endete die letzte Sitzung ohne "Beendet", wurde sie von außen abgewürgt
+    try:
+        marks = [ln for ln in EVENT_LOG.read_text(encoding="utf-8").splitlines()
+                 if "  Start v" in ln or "  Beendet" in ln or "HÄNGER" in ln]
+        if marks and "  Start v" in marks[-1] and "--restart" not in sys.argv:
+            log_event("Vorherige Sitzung endete unerwartet (Prozess beendet ohne Schließen)")
+    except OSError:
+        pass
+    log_event(f"Start v{VERSION} (pid {os.getpid()}{', nach Hänger' if '--restart' in sys.argv else ''})")
     try:
         if IS_WINDOWS:
             try:
